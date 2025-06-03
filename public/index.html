@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chat con Socket.IO</title>
+    <style>
+        body { margin: 0; padding-bottom: 3rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        #form { background: rgba(0, 0, 0, 0.15); padding: 0.25rem; position: fixed; bottom: 0; left: 0; right: 0; display: flex; height: 3rem; box-sizing: border-box; backdrop-filter: blur(10px); }
+        #input { border: none; padding: 0 1rem; flex-grow: 1; border-radius: 2rem; margin: 0.25rem; }
+        #input:focus { outline: none; }
+        #form > button { background: #333; border: none; padding: 0 1rem; margin: 0.25rem; border-radius: 3px; outline: none; color: #fff; }
+        #messages { list-style-type: none; margin: 0; padding: 0; }
+        #messages > li { padding: 0.5rem 1rem; }
+        #messages > li:nth-child(odd) { background: #eee; }
+        .username { font-weight: bold; color: #007bff; }
+        .system-message { color: #888; font-style: italic; }
+        #typing-status { font-style: italic; color: #777; margin-left: 1rem; }
+
+        /* Estilos para el modal de nombre de usuario */
+        #username-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        #username-prompt {
+            background: #fff;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            text-align: center;
+        }
+        #username-prompt input {
+            padding: 0.5rem;
+            margin: 1rem 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 200px;
+        }
+        #username-prompt button {
+            background: #007bff;
+            color: #fff;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #username-error {
+            color: red;
+            margin-top: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div id="username-modal">
+        <div id="username-prompt">
+            <h2>Elige tu nombre de usuario</h2>
+            <input type="text" id="username-input" placeholder="Tu nombre" maxlength="20" />
+            <div id="username-error"></div>
+            <button id="set-username-button">Entrar al Chat</button>
+        </div>
+    </div>
+
+    <ul id="messages"></ul>
+    <div id="typing-status"></div>
+    <form id="form" action="">
+        <input id="input" autocomplete="off" /><button>Enviar</button>
+    </form>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+
+        const usernameModal = document.getElementById('username-modal');
+        const usernameInput = document.getElementById('username-input');
+        const setUsernameButton = document.getElementById('set-username-button');
+        const usernameError = document.getElementById('username-error');
+
+        const form = document.getElementById('form');
+        const input = document.getElementById('input');
+        const messages = document.getElementById('messages');
+        const typingStatus = document.getElementById('typing-status');
+
+        let typingTimeout;
+        let currentUsername = null; // Variable para almacenar el nombre de usuario del cliente
+
+        // Bloquear el chat hasta que se establezca el nombre de usuario
+        form.style.display = 'none';
+        typingStatus.style.display = 'none';
+
+        // --- Lógica de nombre de usuario ---
+        setUsernameButton.addEventListener('click', () => {
+            const desiredUsername = usernameInput.value;
+            if (desiredUsername) {
+                socket.emit('set username', desiredUsername);
+            } else {
+                usernameError.textContent = 'El nombre de usuario no puede estar vacío.';
+            }
+        });
+
+        // Evento del servidor que confirma que el nombre de usuario fue establecido
+        socket.on('username set', (username) => {
+            currentUsername = username;
+            usernameModal.style.display = 'none'; // Oculta el modal
+            form.style.display = 'flex'; // Muestra el formulario de chat
+            typingStatus.style.display = 'block'; // Muestra el estado de typing
+            input.focus(); // Pone el foco en el input del chat
+            console.log(`Nombre de usuario establecido: ${username}`);
+        });
+
+        // Evento del servidor que indica un error al establecer el nombre de usuario
+        socket.on('username error', (message) => {
+            usernameError.textContent = message;
+        });
+
+        // --- Lógica del chat (similar a la anterior, pero con nombre de usuario) ---
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (input.value && currentUsername) { // Asegúrate de tener un nombre de usuario
+                socket.emit('chat message', input.value);
+                input.value = '';
+                clearTimeout(typingTimeout);
+                socket.emit('stop typing');
+            } else if (!currentUsername) {
+                alert('Por favor, establece tu nombre de usuario primero.');
+            }
+        });
+
+        input.addEventListener('input', () => {
+            if (currentUsername) { // Solo si ya tiene nombre de usuario
+                socket.emit('typing');
+                if (typingTimeout) {
+                    clearTimeout(typingTimeout);
+                }
+                typingTimeout = setTimeout(() => {
+                    socket.emit('stop typing');
+                }, 1500);
+            }
+        });
+
+        socket.on('chat message', (data) => {
+            const item = document.createElement('li');
+            if (data.isSystem) {
+                item.textContent = data.text;
+                item.classList.add('system-message');
+            } else {
+                // Mostrar el nombre de usuario antes del mensaje
+                const userSpan = document.createElement('span');
+                userSpan.textContent = data.user + ': ';
+                userSpan.classList.add('username');
+                item.appendChild(userSpan);
+                item.appendChild(document.createTextNode(data.text));
+            }
+            messages.appendChild(item);
+            window.scrollTo(0, document.body.scrollHeight);
+            typingStatus.textContent = ''; // Limpia el estado de "escribiendo"
+        });
+
+        socket.on('user typing', (status) => {
+            typingStatus.textContent = status;
+            window.scrollTo(0, document.body.scrollHeight);
+        });
+
+        socket.on('connect', () => {
+            console.log('Conectado al servidor Socket.IO');
+            // Cuando el cliente se reconecta, intenta volver a establecer el nombre de usuario
+            if (currentUsername) {
+                socket.emit('set username', currentUsername);
+            }
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Desconectado del servidor Socket.IO');
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('Error de conexión:', error);
+        });
+    </script>
+</body>
+</html>
