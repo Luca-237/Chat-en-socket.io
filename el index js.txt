@@ -1,0 +1,59 @@
+// index.js
+
+const express = require('express');
+const { createServer } = require('node:http'); // Necesitas un servidor HTTP explícito para Socket.IO
+const { Server } = require('socket.io'); // Importa la clase Server de Socket.IO
+const path = require('path');
+
+const app = express();
+const server = createServer(app); // Crea un servidor HTTP a partir de tu aplicación Express
+const io = new Server(server);    // Pasa el servidor HTTP a Socket.IO
+
+const port = process.env.PORT || 3000;
+
+// Sirve archivos estáticos desde la carpeta 'public'
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Ruta para la página principal del chat
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// --- Lógica del Servidor Socket.IO ---
+
+// 'connection' es un evento especial que se dispara cuando un nuevo cliente se conecta
+io.on('connection', (socket) => {
+  console.log(`Usuario conectado: ${socket.id}`);
+
+  // Emitir un mensaje a todos los clientes, excepto al que acaba de conectar
+  socket.broadcast.emit('chat message', 'Un nuevo usuario se ha unido al chat.');
+
+  // Escucha el evento 'chat message' desde el cliente
+  socket.on('chat message', (msg) => {
+    console.log(`Mensaje recibido de ${socket.id}: ${msg}`);
+    // 'io.emit()' envía el mensaje a *todos* los clientes conectados
+    io.emit('chat message', msg);
+  });
+
+  // 'disconnect' es un evento especial que se dispara cuando un cliente se desconecta
+  socket.on('disconnect', () => {
+    console.log(`Usuario desconectado: ${socket.id}`);
+    // Emitir un mensaje a todos los clientes que un usuario se ha desconectado
+    io.emit('chat message', 'Un usuario ha abandonado el chat.');
+  });
+
+  // Puedes escuchar cualquier evento personalizado que definas
+  socket.on('typing', () => {
+    // 'socket.broadcast.emit()' envía el mensaje a todos los clientes EXCEPTO al remitente
+    socket.broadcast.emit('user typing', `${socket.id.substring(0, 4)}... está escribiendo.`);
+  });
+
+  socket.on('stop typing', () => {
+    socket.broadcast.emit('user typing', ''); // Limpia el mensaje de "escribiendo"
+  });
+});
+
+// Inicia el servidor HTTP (que Socket.IO está escuchando)
+server.listen(port, () => {
+  console.log(`Servidor de chat escuchando en http://localhost:${port}`);
+});
